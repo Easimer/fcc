@@ -9,4 +9,4 @@ FunctionCall := Name([NameOrConst [, NameOrConst...]])
 Operator := + | - | * | /
 Expression := (NameOrConst | FunctionCall) [Operator [Expression]]
 FunctionDeclaration := Declarator [Qualifier] Name : Type[, Type...] -> Type;
-FunctionDefinition := Definer Name([NameOrConst [, NameOrConst...]]) -> Expression[, Expression];
+FunctionDefinition := Definer Name([NameOrConst [, NameOrConst...]]) [when BooleanExpression] -> Expression[, Expression];
