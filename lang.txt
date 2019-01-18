@@ -1,0 +1,12 @@
+Declarator := decl
+Definer := def
+ExternQualifier := extern
+Qualifier := ExternQualifier
+Name := string
+Arrow := ->
+NameOrConst = Name | Constant;
+FunctionCall := Name([NameOrConst [, NameOrConst...]])
+Operator := + | - | * | /
+Expression := (NameOrConst | FunctionCall) [Operator [Expression]]
+FunctionDeclaration := Declarator [Qualifier] Name : Type[, Type...] -> Type;
+FunctionDefinition := Definer Name([NameOrConst [, NameOrConst...]]) -> Expression[, Expression];

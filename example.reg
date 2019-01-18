@@ -1,0 +1,5 @@
+decl test_function : Z, Z -> Z;
+
+def test_function(0, 0) -> 1;
+def test_function(x, y) -> test_function(x - 1, y - 1) * (x * y);
+
