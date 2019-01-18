@@ -78,7 +78,7 @@ struct fn_decl {
 
 void tokenizer_emit_diag(size_t line, size_t col, const char* fmt, ...) {
 	va_list va;
-	fprintf(stderr, "Bruh moment on line %zu column %zu: ", line + 1, col + 1);
+	fprintf(stderr, "Diagnostic on line %zu column %zu: ", line + 1, col + 1);
 	va_start(va, fmt);
 	vfprintf(stderr, fmt, va);
 	va_end(va);
