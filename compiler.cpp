@@ -1,11 +1,8 @@
+#include "common.h"
 #include <iostream>
-#include <vector>
-#include <string>
+#include <stack>
 #include <cstdarg>
-
-template<typename T>
-using vector = std::vector<T>;
-using string = std::string;
+#include "shunting_yard.h"
 
 inline bool whitespace(char c) {
 	return
@@ -40,7 +37,10 @@ inline bool is_operator(char c) {
 		c == '+' or
 		c == '-' or
 		c == '*' or
-		c == '/';
+		c == '/' or
+		c == '=' or
+		c == '<' or
+		c == '>';
 }
 
 enum class token_nature {
@@ -48,6 +48,8 @@ enum class token_nature {
 	none, name, num_const, op, paren, arrow, comma, eol, colon,
 	// Keywords
 	declarator, definer, qextern,
+
+	function, when
 };
 
 struct token {
@@ -69,11 +71,16 @@ struct token {
 	}
 };
 
+struct fn_def {
+};
+
 struct fn_decl {
 	string name;
 	string type_ret;
 	vector<string> type_args;
 	bool q_extern;
+
+	vector<fn_def> defs;
 };
 
 void tokenizer_emit_diag(size_t line, size_t col, const char* fmt, ...) {
@@ -100,6 +107,8 @@ const char* token_nature_str(token_nature nat) {
 		TOKNAME(definer);
 		TOKNAME(qextern);
 		TOKNAME(colon);
+		TOKNAME(function);
+		TOKNAME(when);
 		default: return "unknown";
 	}
 }
@@ -210,6 +219,8 @@ vector<token> keyword_pass(vector<token>& tokens) {
 				token.nat = token_nature::declarator;
 			} else if(token.str == "def") {
 				token.nat = token_nature::definer;
+			} else if(token.str == "when") {
+				token.nat = token_nature::when;
 			} else if(token.str == "extern") {
 				if(i - 1 < ret.size()) {
 					auto& prev = ret[i - 1];
@@ -223,6 +234,13 @@ vector<token> keyword_pass(vector<token>& tokens) {
 						tokenizer_emit_diag(token.row, token.col, "extern qualifier must come after declarator, ignored");
 						continue;
 				}
+			} else {
+				if(i + 1 < tokens.size()) {
+					auto& ntoken = tokens[i + 1];
+					if(ntoken.nat == token_nature::paren) {
+						token.nat = token_nature::function;
+					}
+				}
 			}
 		}
 		ret.push_back(std::move(token));
@@ -235,6 +253,7 @@ vector<vector<token>> break_lines(vector<token>& tokens) {
 	vector<token> cur;
 	for(auto& tok : tokens) {
 		if(tok.nat == token_nature::eol) {
+			cur.push_back(std::move(tok));
 			ret.push_back(std::move(cur));
 		} else {
 			cur.push_back(std::move(tok));
@@ -393,8 +412,171 @@ vector<fn_decl> fetch_fn_decls(const vector<vector<token>>& lines) {
 	return ret;
 }
 
+vector<sh_token> sh_genvector(const token* first, const token* last) {
+	vector<sh_token> ret;
+
+	while(first != last) {
+		auto& tok = *first;
+		sh_token shtok;
+		shtok.str = tok.str;
+		shtok.row = tok.row;
+		shtok.col = tok.col;
+		if(tok.nat == token_nature::name || tok.nat == token_nature::num_const) {
+			shtok.type = sh_token_t::var;
+			ret.push_back(std::move(shtok));
+		} else if(tok.nat == token_nature::function) {
+			shtok.type = sh_token_t::fun;
+			ret.push_back(std::move(shtok));
+		} else if(tok.nat == token_nature::paren) {
+			if(shtok.str == "(") {
+				shtok.type = sh_token_t::lbra;
+			} else {
+				shtok.type = sh_token_t::rbra;
+			}
+			ret.push_back(std::move(shtok));
+		} else if(tok.nat == token_nature::op) {
+			shtok.type = sh_token_t::op;
+			ret.push_back(std::move(shtok));
+		}
+		first++;
+	}
+
+	return ret;
+}
+
+int op_prec(char c) {
+#define OP_PREC(c, n) case c: return n
+	switch(c) {
+		OP_PREC('*', 5);
+		OP_PREC('/', 5);
+		OP_PREC('+', 6);
+		OP_PREC('-', 6);
+		OP_PREC('>', 9);
+		OP_PREC('<', 9);
+		OP_PREC('=', 10);
+	}
+	return -1;
+}
+
+struct expression;
+
+struct expression {
+	string str;
+	expression *lhs, *rhs;
+};
+
+vector<vector<token>> break_expression(const token* first, const token* last) {
+	vector<vector<token>> ret;
+	vector<token> cur;
+
+	while(first != last) {
+		if(first->nat == token_nature::comma) {
+			ret.push_back(std::move(cur));
+		} else {
+			cur.push_back(*first);
+		}
+		first++;
+	}
+
+	if(cur.size()) {
+		ret.push_back(std::move(cur));
+	}
+
+	return ret;
+}
+
+vector<fn_def> fetch_fn_defs(const vector<vector<token>>& lines, const vector<fn_decl>& decls) {
+	vector<fn_def> ret;
+
+	for(size_t i = 0; i < lines.size(); i++) {
+		auto& line = lines[i];
+		if(line.size() > 0 && line[0].nat == token_nature::definer) {
+			fn_def def;
+
+			if(line[1].nat != token_nature::function) {
+				tokenizer_emit_diag(line[1].row, line[1].col, "expected function name after definer");
+				continue;
+			}
+
+			auto name = line[1].str;
+
+			// lookup matching decl
+			size_t decli = -1;
+			for(size_t decl = 0; decl < decls.size(); decl++) {
+				if(decls[decl].name == name) {
+					decli = decl;
+					break;
+				}
+			}
+			if(decli == (size_t)-1) {
+				tokenizer_emit_diag(line[1].row, line[1].col, "function defined, but not declared");
+				continue;
+			}
+
+			auto& decl = decls[decli];
+
+			// TODO: check if definition matches declaration
+			size_t when_clause = 0;
+			size_t arrow = 0;
+			size_t eol = 0;
+
+			for(size_t toki = 2; toki < line.size(); toki++) {
+				if(line[toki].nat == token_nature::when) {
+					when_clause = toki;
+				}
+				if(line[toki].nat == token_nature::arrow) {
+					arrow = toki;
+				}
+				if(line[toki].nat == token_nature::eol) {
+					eol = toki;
+				}
+			}
+
+			if(!when_clause) {
+				std::cerr << "(no when clause => base case)" << std::endl;
+			}
+			if(!arrow) {
+				tokenizer_emit_diag(line[0].row, line[0].col, "expected arrow in function definition");
+				continue;
+			}
+			if(!eol) {
+				tokenizer_emit_diag(line[0].row, line[0].col, "WTF: no end of line");
+				continue;
+			}
+
+			if(when_clause) {
+				auto wcl_tokens = sh_genvector(line.data() + when_clause + 1, line.data() + arrow);
+
+				wcl_tokens = shunting_yard(std::move(wcl_tokens), &op_prec);
+
+				for(size_t i = 0; i < wcl_tokens.size(); i++) {
+					std::cerr << wcl_tokens[i].str << ' ';
+				}
+				std::cerr << std::endl;
+			}
+
+			// break expression into subexpressions
+			auto exprs = break_expression(line.data() + arrow + 1, line.data() + eol);
+
+			for(auto& expr : exprs) {
+				std::cerr << "EXPR: ";
+				for(auto& tok : expr) {
+					std::cerr << tok.str << ' ';
+				}
+				std::cerr << std::endl;
+
+				auto expr_tokens = sh_genvector(expr.data(), expr.data() + expr.size());
+				expr_tokens = shunting_yard(std::move(expr_tokens), &op_prec);
+			}
+
+		}
+	}
+
+	return ret;
+}
+
 int main(int argc, char** argv) {
-	auto tokens = tokenize("decl extern print : T -> void;\ndecl test_function : Z, Z -> Z;\ndef test_function(x, y) -> x * y;");
+	auto tokens = tokenize("decl fib : Z -> Z; def fib(n) when n = 1 -> 1; def fib(n) when n = 2 -> 1; def fib(n) -> fib(n - 2) + fib(n - 1);");
 	tokens = keyword_pass(tokens);
 	auto lines = break_lines(tokens);
 	for(auto& line : lines) {
@@ -410,6 +592,11 @@ int main(int argc, char** argv) {
 			std::cerr << arg << ',';
 		}
 		std::cerr << ')' << std::endl;
+	}
+
+	auto fn_defs = fetch_fn_defs(lines, fn_decls);
+	for(auto& def : fn_defs) {
+		std::cerr << "def" << std::endl;
 	}
 	return 0;
 }
