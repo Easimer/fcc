@@ -567,6 +567,11 @@ vector<fn_def> fetch_fn_defs(const vector<vector<token>>& lines, const vector<fn
 
 				auto expr_tokens = sh_genvector(expr.data(), expr.data() + expr.size());
 				expr_tokens = shunting_yard(std::move(expr_tokens), &op_prec);
+				std::cerr << "SHEXPR: ";
+				for(auto& tok : expr_tokens) {
+					std::cerr << tok.str << ' ';
+				}
+				std::cerr << std::endl;
 			}
 
 		}

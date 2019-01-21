@@ -19,9 +19,10 @@ vector<sh_token> shunting_yard(vector<sh_token>&& sh_tokens, operator_precedence
 				auto& op_top = s_op.back();
 				auto op_top_prec = prec(op_top.str[0]);
 				while(
+						s_op.size() > 0 and (
 						((op_top.type == sh_token_t::fun) or
 						(precedence >= op_top_prec)) and op_top.type != sh_token_t::lbra
- 					)	{
+ 					))	{
 					s_ret.push_back(std::move(op_top));
 					s_op.pop_back();
 					op_top = s_op.back();
